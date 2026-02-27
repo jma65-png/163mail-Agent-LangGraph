@@ -1,17 +1,20 @@
-
 from dotenv import load_dotenv
 import json
 import os
 from langgraph.store.base import BaseStore
 from langchain_core.messages import SystemMessage
-from core.apimodels import get_model_gpt
-from core.state import UserPreferences
-load_dotenv()
+from core.models import get_llm
+from core.scheme import Userpreference
+from agents.memory_prompt import memory_instructions
+from agents.agent_prompt import default_triage_instructions, default_response_preferences, default_cal_preferences
 
-llm = get_model_gpt()
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-# MEMORY_FILE = "long_term_memory.json"
-MEMORY_FILE = os.path.join(CURRENT_DIR, "..", "long_term_memory.json")
+load_dotenv()
+llm = get_llm()
+
+CURRENT_FILE_PATH = os.path.abspath(__file__)
+CURRENT_DIR = os.path.dirname(CURRENT_FILE_PATH)
+MEMORY_FILE = os.path.normpath(os.path.join(CURRENT_DIR, "..", "long_term_memory.json"))
+
 
 def save_to_disk(store: BaseStore):
     """把内存里的所有抽屉同步到 JSON 文件里"""
@@ -24,7 +27,6 @@ def save_to_disk(store: BaseStore):
     for ns in namespaces:
         item = store.get(ns, "preferences")
         if item:
-
             data["|".join(ns)] = item.value["preferences"]
 
     with open(MEMORY_FILE, "w", encoding="utf-8") as f:
@@ -45,13 +47,10 @@ def load_from_disk(store: BaseStore):
             store.put(ns, "preferences", {"preferences": value})
     print(f"已从硬盘恢复历史档案。")
 
+
 def get_memory(store: BaseStore, namespace: tuple, default_content: str) -> str:
     """
     辅助函数：去指定的抽屉（namespace）拿档案，没有就用默认值
-    :param store:
-    :param namespace:
-    :param default_content:
-    :return:
     """
 
     memory_item = store.get(namespace, "preferences")
@@ -67,10 +66,7 @@ def get_memory(store: BaseStore, namespace: tuple, default_content: str) -> str:
 def update_memory(store: BaseStore, namespace: tuple, messages: list):
     """
     辅助函数：分析指定的对话，即时更新专属抽屉（namespace）的记忆
-    :param store:
-    :param namespace:
-    :param messages:
-    :return:
+
     """
     print(f"正在更新专属档案库: {namespace[1]} ...")
 
@@ -78,30 +74,46 @@ def update_memory(store: BaseStore, namespace: tuple, messages: list):
     current_prefs = get_memory(store, namespace, "")
 
     # 2. “三明治强化提示词”
-    memory_instructions = f"""你是一个专门负责管理用户偏好的高级档案管理员。
-
-以下是用户当前的偏好档案：
-<current_preferences>
-{current_prefs}
-</current_preferences>
-
-请分析对话记录并更新档案。
-【严格要求】：
-1. 永远不要覆盖整个配置，只针对性地添加新信息，如果新信息是档案中没有的，请追加到末尾。
-2. 只有当用户的最新反馈直接反驳了旧偏好时，才修改旧偏好。
-3. 必须原封不动地保留档案中的其他所有现有信息。
-4. 保持与原始档案一致的格式。
-5. 绝对不要包含 <current_preferences> 或 <updated_preferences> 等任何标签。
-6. 绝对不要包含任何开场白或解释文字。
-"""
-
+    memory = memory_instructions.format(current_prefs=current_prefs)
     # 3. 调用模型做总结
-    structured_llm = llm.with_structured_output(UserPreferences)
-    result = structured_llm.invoke([SystemMessage(content=memory_instructions)] + messages)
+    llm = get_llm()
+    structured_llm = llm.with_structured_output(Userpreference)
+    result = structured_llm.invoke([SystemMessage(content=memory)] + messages)
 
     # 4. 把新档案放回抽屉
-    new_prefs = result.user_preferences
+    new_prefs = result.preferences
     store.put(namespace, "preferences", {"preferences": new_prefs})
 
-    print(f"档案 {namespace[1]} 已更新！\n思考过程：{result.chain_of_thought}")
+    print(f"档案 {namespace[1]} 已更新！\n思考过程：{result.reasoning}")
     save_to_disk(store)
+
+
+if __name__ == '__main__':
+    from langgraph.store.memory import InMemoryStore
+
+    mock_store = InMemoryStore()
+    test_data = {
+        ("email_assistant", "triage_preferences"): default_triage_instructions,
+        ("email_assistant", "response_preferences"): default_response_preferences,
+        ("email_assistant", "cal_preferences"): default_cal_preferences
+    }
+    for ns, content in test_data.items():
+        mock_store.put(ns, "preferences", {"preferences": content})
+
+    save_to_disk(mock_store)
+
+    load_from_disk(mock_store)
+    test_namespace = ("email_assistant", "response_preferences")
+    default_text = default_response_preferences
+    first_call = get_memory(mock_store, test_namespace, default_text)
+
+    print(f"获取到的偏好内容前50字: {first_call[:50]}...")
+
+    test_messages = [
+        {"role": "user", "content": "以后给面试邀请回信时，落款不要写‘张煦’了，请改写成‘小张’，这样显得亲切一点。"}
+    ]
+
+    update_memory(mock_store, test_namespace, test_messages)
+
+    updated_call = get_memory(mock_store, test_namespace, default_text)
+    print(f"更新后的偏好全文预览：\n{updated_call}")
