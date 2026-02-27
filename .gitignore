@@ -1,0 +1,10 @@
+# 忽略 Python 缓存
+__pycache__/
+*.pyc
+
+# 忽略敏感配置文件
+.env
+
+# 忽略本地开发工具设置
+.vscode/
+.idea/
