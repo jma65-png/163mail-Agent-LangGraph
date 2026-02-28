@@ -243,7 +243,7 @@ def interrupt_handler(state: State, store: BaseStore) -> Command[Literal["respon
             "config": config,
             "description": description,
             "user_id": curr_user_id,  # 新增：收件人
-            "thread_id": curr_thread_id  # 新增：把 thread_id
+            "thread_id": curr_thread_id  # 新增：thread_id
         }
 
         res = interrupt([request])
@@ -267,14 +267,24 @@ def interrupt_handler(state: State, store: BaseStore) -> Command[Literal["respon
             })
             goto = "response_agent"
 
-        # 用户直接动手改了内容
         elif response["type"] == "edit":
-            new_args = response["args"]
+            # 这里的 new_args 现在是用户在飞书输入框里写的纯文本（即用户手动重写的邮件正文）
+            user_manual_content = response["args"]
             print("检测到用户手动修改了邮件，正在分析修改习惯...")
+
+            # 提取 AI 原本打算发送的参数
+            original_args = tool_call["args"]
+
+            # 组装新的合法参数字典，保留原收件人和主题，替换正文
+            new_args = {
+                "to": original_args.get("to"),
+                "subject": original_args.get("subject"),
+                "content": user_manual_content  # 注入用户手动写的正文
+            }
 
             learning_message = [{
                 "role": "user",
-                "content": f"原始生成的参数：{tool_call['args']}\n用户手动修改后的参数：{new_args}\n请分析用户的修改点（如语气、落款、格式），并更新‘回复偏好’档案。"
+                "content": f"原始生成的参数：{original_args}\n用户手动修改后的参数：{new_args}\n请分析用户的修改点（如语气、落款、格式），并更新‘回复偏好’档案。"
             }]
             update_memory(store, ("email_assistant", "response_preferences"), learning_message)
 
@@ -284,16 +294,18 @@ def interrupt_handler(state: State, store: BaseStore) -> Command[Literal["respon
             goto = "__end__"
 
         elif response["type"] == "accept":
+            print("用户点击确认，直接发送原草稿...")
             tool = tools_by_name[tool_call["name"]]
             observation = tool.invoke(tool_call["args"])
             result.append({"role": "tool", "content": observation, "tool_call_id": tool_call["id"]})
             goto = "__end__"
 
+        # 【新增】：用户点击忽略，取消发送
         elif response["type"] == "ignore":
+            print("用户忽略了此邮件，已取消发送...")
+            # LangGraph 要求必须返回一个 ToolMessage 来闭环，所以我们模拟一个空结果
+            result.append({"role": "tool", "content": "用户已取消操作，未发送邮件。", "tool_call_id": tool_call["id"]})
             goto = "__end__"
-
-        else:
-            raise ValueError(f"无效的响应类型: {response['type']}")
 
     update_data = {"messages": result}
     return Command(goto=goto, update=update_data)
@@ -342,14 +354,14 @@ if __name__ == '__main__':
 
     test_email = {
         "email_input": {
-            "author": "蚂蚁集团-招聘组 <talent-hiring@antgroup.com>",
-            "to": "majunn@163.com",
+            "author": "招聘集团<260@qq.com>",
+            "to": "maj04@163.com",
             "subject": "【面试邀约】蚂蚁集团-支付事业部-Python 开发工程师（杭州）",
             "email_thread": """张同学你好：
 
                     我是蚂蚁集团支付事业部的 HR。很高兴收到你投递的简历，你的 AI Agent 项目经历（163邮件助手）与我们部门目前的业务需求非常契合。
 
-                    我们想邀请你参加本周五（2月27日）下午 14:00 的技术初面，形式为远程面试。
+                    我们想邀请你参加下午 14:00 的技术初面，形式为远程面试。
 
                     请确认该时间是否方便？如果时间冲突，请提供两个你方便的候选时段（建议在工作日 10:00 - 18:00 之间）。
 
@@ -364,3 +376,24 @@ if __name__ == '__main__':
             print(f"执行节点: {node_name}")
             print(f"状态更新: {state_update}\n")
             print("-" * 40)
+
+    print("\n" + "=" * 50)
+    print("模拟用户在飞书(Accept)")
+    print("=" * 50)
+
+    mock_feishu_accept_action = {
+        "type": "accept",
+        "action": "write_email",
+        "thread_id": thread_id,
+        "args": {}
+    }
+    mock_operator_open_id = "ou_6a117f842edaff2"
+    from langgraph.types import Command
+
+    for event in app.stream(Command(resume=mock_feishu_accept_action), config=config):
+        for node_name, state_update in event.items():
+            print(f"执行节点: {node_name}")
+            print(f"状态更新: {state_update}\n")
+            print("-" * 40)
+
+    print(" Accept 流程测试结束！")
