@@ -110,7 +110,6 @@ async def event_handler(request: Request, background_tasks: BackgroundTasks):
 #
 #     return {"msg": "ok"}
 
-
 @app.post("/webhook/card")
 async def card_handler(request: Request, background_tasks: BackgroundTasks):
     try:
@@ -126,8 +125,17 @@ async def card_handler(request: Request, background_tasks: BackgroundTasks):
 
     event_data = body.get("event", {})
     open_id = event_data.get("operator", {}).get("open_id")
-    action_value = event_data.get("action", {}).get("value", {})
+
+    action_data = event_data.get("action", {})
+    action_value = action_data.get("value", {})  # 按钮本身绑定的值
+    form_value = action_data.get("form_value", {})  # 卡片上所有输入框的值
+
     current_thread_id = action_value.get("thread_id")
+
+    user_input_text = form_value.get("user_input_text", "")
+
+    if action_value.get("type") in ["response", "edit"]:
+        action_value["args"] = user_input_text
 
     if open_id and action_value and current_thread_id:
         background_tasks.add_task(
@@ -139,7 +147,7 @@ async def card_handler(request: Request, background_tasks: BackgroundTasks):
     else:
         print(f"无法提取必要参数。action_value: {action_value}")
 
-    return {"toast": {"type": "info", "content": "Agent 继续执行..."}}
+    return {"toast": {"type": "info", "content": "Agent 已收到反馈，继续执行..."}}
 
 
 if __name__ == "__main__":

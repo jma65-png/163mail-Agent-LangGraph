@@ -68,26 +68,49 @@ def build_interrupt_card(interrupt_data: dict) -> dict:
     if not curr_thread_id:
         curr_thread_id = action_req.get("args", {}).get("thread_id")
 
+    card_json = {
+        "config": {"wide_screen_mode": True},
+        "header": {"title": {"tag": "plain_text", "content": f"📧 {action_name}"}, "template": "blue"},
+        "elements": [
+            {"tag": "markdown", "content": f"**待处理内容：**\n\n{description}"},
+            {"tag": "hr"}
+        ]
+    }
+
+    if config.get("allow_respond") or config.get("allow_edit"):
+        card_json["elements"].append({
+            "tag": "textarea",
+            "name": "user_input_text",
+            "placeholder": {
+                "tag": "plain_text",
+                "content": "如需提供修改意见或直接修改内容，请在此输入..."
+            }
+        })
+
     action_elements = []
     if config.get("allow_accept"):
         action_elements.append(
             {"tag": "button", "text": {"tag": "plain_text", "content": "直接发送 / 确认"}, "type": "primary",
              "value": {"type": "accept", "action": action_name, "thread_id": curr_thread_id}})
-    if config.get("allow_respond") or config.get("allow_edit"):
-        action_elements.append(
-            {"tag": "button", "text": {"tag": "plain_text", "content": "提供修改意见"}, "type": "default",
-             "value": {"type": "response", "action": action_name, "thread_id": curr_thread_id}})
-    if config.get("allow_ignore"):
-        action_elements.append({"tag": "button", "text": {"tag": "plain_text", "content": "忽略"}, "type": "danger",
-                                "value": {"type": "ignore", "action": action_name, "thread_id": curr_thread_id}})
 
-    card_json = {
-        "config": {"wide_screen_mode": True},
-        "header": {"title": {"tag": "plain_text", "content": f"📧 {action_name}"}, "template": "blue"},
-        "elements": [{"tag": "markdown", "content": f"**待处理内容：**\n\n{description}"}, {"tag": "hr"}]
-    }
+    if config.get("allow_respond"):
+        action_elements.append(
+            {"tag": "button", "text": {"tag": "plain_text", "content": "提交修改意见"}, "type": "default",
+             "value": {"type": "response", "action": action_name, "thread_id": curr_thread_id}})
+
+    if config.get("allow_edit"):
+        action_elements.append(
+            {"tag": "button", "text": {"tag": "plain_text", "content": "作为最终版本发送 (Edit)"}, "type": "primary",
+             "value": {"type": "edit", "action": action_name, "thread_id": curr_thread_id}})
+
+    if config.get("allow_ignore"):
+        action_elements.append(
+            {"tag": "button", "text": {"tag": "plain_text", "content": "忽略"}, "type": "danger",
+             "value": {"type": "ignore", "action": action_name, "thread_id": curr_thread_id}})
+
     if action_elements:
         card_json["elements"].append({"tag": "action", "actions": action_elements})
+
     return card_json
 
 
