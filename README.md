@@ -47,6 +47,12 @@ graph TD
     InterruptHandler -- 打回重写  --> ResponseAgent
     InterruptHandler -- 确认发送 / 手动修改 / 取消 --> END_NODE
 ```
+## 待办事项 (Optional)
+- 接入更复杂的 RAG 知识库，用于用户记忆处理和回复特定业务邮件。
+
+
+
+
 
 
 
